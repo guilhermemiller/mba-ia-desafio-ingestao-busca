@@ -22,12 +22,12 @@ def ingest_pdf():
     loader = PyPDFLoader(PDF_PATH)
     documents = loader.load()
 
-    print("Splitting documents into chunks...")
+    print("Splitting documents into chunks... chunk_size=1000, chunk_overlap=150")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     docs = text_splitter.split_documents(documents)
     print(f"Split into {len(docs)} chunks.")
 
-    print("Initializing embeddings model...")
+    print(f"Initializing embeddings model...{os.getenv("GOOGLE_EMBEDDING_MODEL")}")
     # Correctly instantiate the embeddings model
     embeddings_model = GoogleGenerativeAIEmbeddings(model=os.getenv("GOOGLE_EMBEDDING_MODEL"),api_key=os.getenv("GOOGLE_API_KEY"))
 
