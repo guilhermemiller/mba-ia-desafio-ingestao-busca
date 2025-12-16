@@ -1,43 +1,48 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
-from dotenv import load_dotenv
-import json
-import os
 from search import search_prompt
+from config import config
 
-load_dotenv()
+class LLMProvider:
+    """Fornece a instância do modelo de linguagem."""
+    def __init__(self, config):
+        self.config = config
 
-def get_llm():
-    """Inicializa e retorna o modelo de linguagem do Google."""
-    return ChatGoogleGenerativeAI(
-        model=os.getenv("GOOGLE_CHAT_MODEL", "gemini-2.5-flash-lite"),
-        api_key=os.getenv("GOOGLE_API_KEY"),
-    )
+    def get_llm(self):
+        """Inicializa e retorna o modelo de linguagem do Google."""
+        return ChatGoogleGenerativeAI(
+            model=self.config.get_chat_model(),
+            api_key=self.config.get_api_key(),
+        )
+
+class ChatInterface:
+    """Gerencia a interface de chat na linha de comando."""
+    def __init__(self, llm):
+        self.chain = search_prompt(llm)
+
+    def start(self):
+        """Starts the chat session."""
+        if not self.chain:
+            print("Não foi possível iniciar o chat. Verifique os erros de inicialização.")
+            return
+
+        while True:
+            question = input("\nSua pergunta: ")
+            if question.lower() == 'sair':
+                print("Até logo!")
+                break
+
+            response = self.chain.invoke(question)
+            print("=" * 50)
+            print("\nResposta:\n", response)
+            print("=" * 50)
 
 def main():
-    llm = get_llm()
-    chain = search_prompt(llm)
-    if not chain:
-        print("Não foi possível iniciar o chat. Verifique os erros de inicialização.")
-        return
-
-    while True:
-        question = input("\nSua pergunta: ")
-        if question.lower() == 'sair':
-            print("Até logo!")
-            break
-
-        # Invoca a cadeia e obtém um dicionário com a resposta e o contexto
-        result = chain.invoke(question)
-        response = result.get("resposta", "Não tenho informações necessárias para responder sua pergunta.")
-        docs_com_score = result.get("docs_com_score", [])
-
-        print("\n--- Documentos recuperados (Contexto) ---")
-        for doc, score in docs_com_score:
-            print(f"Score (distância): {score:.4f}")
-            print(f"Metadata: {json.dumps(doc.metadata, indent=2)}")
-            print("--------------------------------------")
-
-        print("\nResposta:", response)
+    """Função principal para executar a interface de chat."""
+    llm_provider = LLMProvider(config)
+    llm = llm_provider.get_llm()
+    
+    chat_interface = ChatInterface(llm)
+    chat_interface.start()
 
 if __name__ == "__main__":
     main()

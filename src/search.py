@@ -2,9 +2,10 @@ from langchain_community.vectorstores.pgvector import PGVector
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableLambda
-import os
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from typing import List, Tuple
 from langchain_core.documents import Document
+from config import config
 
 PROMPT_TEMPLATE = """
 CONTEXTO:
@@ -17,66 +18,58 @@ REGRAS:
 - Nunca invente ou use conhecimento externo.
 - Nunca produza opiniões ou interpretações além do que está escrito.
 
-EXEMPLOS DE PERGUNTAS FORA DO CONTEXTO:
-Pergunta: "Qual é a capital da França?"
-Resposta: "Não tenho informações necessárias para responder sua pergunta."
-
-Pergunta: "Quantos clientes temos em 2024?"
-Resposta: "Não tenho informações necessárias para responder sua pergunta."
-
-Pergunta: "Você acha isso bom ou ruim?"
-Resposta: "Não tenho informações necessárias para responder sua pergunta."
-
 PERGUNTA DO USUÁRIO:
 {pergunta}
 
 RESPONDA A "PERGUNTA DO USUÁRIO"
 """
 
+class VectorDBRetriever:
+    """Gerencia a recuperação de documentos do banco de dados vetorial."""
+    def __init__(self, config):
+        self.config = config
+        self.embeddings_model = GoogleGenerativeAIEmbeddings(
+            model=config.google_embedding_model,
+            api_key=config.google_api_key
+        )
+        self.db = PGVector(
+            connection_string=config.database_url,
+            collection_name=config.collection_name,
+            embedding_function=self.embeddings_model
+        )
+
+    def get_docs_with_score(self, query: str) -> List[Tuple[Document, float]]:
+        """Busca documentos e seus scores de similaridade."""
+        return self.db.similarity_search_with_score(query, k=10)
+
+    def format_context(self, docs_with_scores: List[Tuple[Document, float]]) -> str:
+        """Formata os documentos para o prompt do LLM."""
+        return "\n\n".join(doc.page_content for doc, score in docs_with_scores)
+
+class RAGChainBuilder:
+    """Constrói a cadeia RAG."""
+    def __init__(self, llm, retriever: VectorDBRetriever):
+        self.llm = llm
+        self.retriever = retriever
+        self.prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+
+    def build(self):
+        """Constrói e retorna a cadeia RAG."""
+        rag_chain_from_prompt = self.prompt | self.llm | StrOutputParser()
+
+        rag_chain = (
+            {
+                "contexto": RunnableLambda(self.retriever.get_docs_with_score) | RunnableLambda(self.retriever.format_context),
+                "pergunta": RunnablePassthrough()
+            }
+            | rag_chain_from_prompt
+        )
+        return rag_chain
+
 def search_prompt(llm):
     """
     Configura e retorna uma cadeia de RAG (Retrieval-Augmented Generation).
     """
-    CONNECTION_STRING = os.getenv("DATABASE_URL")
-    COLLECTION_NAME = os.getenv("PG_VECTOR_COLLECTION_NAME")
-
-    embeddings_model = GoogleGenerativeAIEmbeddings(
-        model=os.getenv("GOOGLE_EMBEDDING_MODEL"),
-        api_key=os.getenv("GOOGLE_API_KEY")
-    )
-
-    # Conecta ao banco de dados vetorial e cria um retriever
-    db = PGVector(
-        connection_string=CONNECTION_STRING,
-        collection_name=COLLECTION_NAME,
-        embedding_function=embeddings_model
-    )
-
-    prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-
-    def _get_docs_with_score(query: str) -> list[tuple[Document, float]]:
-        """Busca documentos e seus scores de similaridade."""
-        return db.similarity_search_with_score(query, k=10)
-
-    def _format_context(docs_with_scores: list[tuple[Document, float]]) -> str:
-        """Formata os documentos para o prompt do LLM."""
-        return "\n\n".join(doc.page_content for doc, score in docs_with_scores)
-
-    # Define a sub-cadeia que formata o prompt, chama o LLM e parseia a saída.
-    # Ela espera um dicionário com 'contexto' e 'pergunta'.
-    rag_chain_from_prompt = prompt | llm | StrOutputParser()
-
-    # Cria a cadeia RAG
-    rag_chain = (
-        {
-            "docs_com_score": RunnableLambda(_get_docs_with_score),
-            "pergunta": RunnablePassthrough()
-        } | RunnableParallel(
-            docs_com_score=lambda x: x["docs_com_score"],
-            resposta={
-                "contexto": lambda x: _format_context(x["docs_com_score"]),
-                "pergunta": lambda x: x["pergunta"]
-            } | rag_chain_from_prompt
-        ) 
-    )
-    return rag_chain
+    retriever = VectorDBRetriever(config)
+    chain_builder = RAGChainBuilder(llm, retriever)
+    return chain_builder.build()
