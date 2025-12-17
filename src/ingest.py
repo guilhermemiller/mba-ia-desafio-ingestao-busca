@@ -3,9 +3,9 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores.pgvector import PGVector
 import os
-from dotenv import load_dotenv
 from langchain_core.documents import Document
 from typing import List
+from config import config
 
 class DocumentLoader:
     """Gerencia o carregamento de documentos de um caminho especificado."""
@@ -25,7 +25,7 @@ class TextChunker:
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     def split(self, documents: List[Document]) -> List[Document]:
-        print(f"Dividindo documentos em pedaços... tamanho_pedaço={self.splitter._chunk_size}, sobreposição_pedaço={self.splitter._chunk_overlap}")
+        print(f"Dividindo documentos em pedaços... chunk_size={self.splitter._chunk_size}, chunk_overlap={self.splitter._chunk_overlap}")
         docs = self.splitter.split_documents(documents)
         print(f"Dividido em {len(docs)} pedaços.")
         return docs
@@ -61,12 +61,12 @@ class IngestionPipeline:
     """Orquestra o processo de ingestão de documentos."""
     def __init__(self, config):
         self.config = config
-        self.loader = DocumentLoader(config['pdf_path'])
+        self.loader = DocumentLoader(config.pdf_path)
         self.splitter = TextChunker()
-        self.embedding_provider = EmbeddingProvider(config['embedding_model'], config['api_key'])
+        self.embedding_provider = EmbeddingProvider(config.google_embedding_model, config.google_api_key)
         self.vector_store = VectorStoreManager(
-            config['db_url'], 
-            config['collection_name'], 
+            config.database_url, 
+            config.collection_name, 
             self.embedding_provider.get_embeddings()
         )
 
@@ -75,37 +75,8 @@ class IngestionPipeline:
         docs = self.splitter.split(documents)
         self.vector_store.ingest(docs)
 
-class ChatInterface:
-    """Gerencia a interface de chat na linha de comando."""
-    def __init__(self, llm):
-        self.chain = search_prompt(llm)
-
-    def start(self):
-        """Inicia a sessão de chat."""
-        if not self.chain:
-            print("Não foi possível iniciar o chat. Verifique os erros de inicialização.")
-            return
-
-        while True:
-            question = input("\nSua pergunta: ")
-            if question.lower() == 'sair':
-                print("Até logo!")
-                break
-
-            response = self.chain.invoke(question)
-            print("\nResposta:\n", response)
-
 def main():
     """Função principal para executar o pipeline de ingestão."""
-    load_dotenv()
-    config = {
-        'pdf_path': os.getenv("PDF_PATH"),
-        'db_url': os.getenv("DATABASE_URL"),
-        'collection_name': os.getenv("PG_VECTOR_COLLECTION_NAME"),
-        'embedding_model': os.getenv("GOOGLE_EMBEDDING_MODEL"),
-        'api_key': os.getenv("GOOGLE_API_KEY")
-    }
-    
     try:
         pipeline = IngestionPipeline(config)
         pipeline.run()
