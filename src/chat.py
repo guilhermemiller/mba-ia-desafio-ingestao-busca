@@ -26,15 +26,19 @@ class ChatInterface:
             return
 
         while True:
-            question = input("\nSua pergunta: ")
-            if question.lower() == 'sair':
-                print("Até logo!")
-                break
+            try:
+                question = input("\nSua pergunta: ")
+                if question.lower() == 'sair':
+                    print("Até logo!")
+                    break
 
-            response = self.chain.invoke(question)
-            print("=" * 50)
-            print("\nResposta:\n", response)
-            print("=" * 50)
+                response = self.chain.invoke(question)
+                print("=" * 50)
+                print("\nResposta:\n", response)
+                print("=" * 50)
+            except Exception as e:
+                print(f"Erro ao processar pergunta: {e}")
+                print("Tente novamente.")
 
 def main():
     """Função principal para executar a interface de chat."""

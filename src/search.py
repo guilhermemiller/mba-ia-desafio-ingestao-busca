@@ -1,4 +1,4 @@
-from langchain_community.vectorstores.pgvector import PGVector
+from langchain_postgres import PGVectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from typing import List, Tuple
 from langchain_core.documents import Document
 from config import config
+from ingest import SyncEmbeddingsWrapper
 
 PROMPT_TEMPLATE = """
 CONTEXTO:
@@ -28,14 +29,15 @@ class VectorDBRetriever:
     """Gerencia a recuperação de documentos do banco de dados vetorial."""
     def __init__(self, config):
         self.config = config
-        self.embeddings_model = GoogleGenerativeAIEmbeddings(
-            model=config.google_embedding_model,
+        # Use the sync wrapper to avoid event loop issues
+        self.embeddings_model = SyncEmbeddingsWrapper(
+            model_name=config.google_embedding_model,
             api_key=config.google_api_key
         )
-        self.db = PGVector(
-            connection_string=config.database_url,
-            collection_name=config.collection_name,
-            embedding_function=self.embeddings_model
+        self.db = PGVectorStore.create_sync(
+            engine=config.pg_engine,
+            table_name=config.collection_name,
+            embedding_service=self.embeddings_model
         )
 
     def get_docs_with_score(self, query: str) -> List[Tuple[Document, float]]:
